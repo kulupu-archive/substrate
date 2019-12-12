@@ -186,12 +186,9 @@ pub trait Storage {
 	}
 
 	/// "Commit" all existing operations and compute the resulting storage root.
-	///
-	/// The hashing algorithm is defined by the `Block`.
-	///
-	/// Returns the SCALE encoded hash.
-	fn root(&mut self) -> Vec<u8> {
-		self.storage_root()
+	fn root(&mut self) -> H256 {
+		H256::decode(&mut &self.storage_root()[..])
+			.expect("Node is configured to use the same hash; qed")
 	}
 
 	/// "Commit" all existing operations and compute the resulting child storage root.
@@ -205,13 +202,12 @@ pub trait Storage {
 	}
 
 	/// "Commit" all existing operations and get the resulting storage change root.
-	/// `parent_hash` is a SCALE encoded hash.
 	///
 	/// The hashing algorithm is defined by the `Block`.
-	///
-	/// Returns an `Option` that holds the SCALE encoded hash.
-	fn changes_root(&mut self, parent_hash: &[u8]) -> Option<Vec<u8>> {
-		self.storage_changes_root(parent_hash).ok().and_then(|h| h)
+	fn changes_root(&mut self, parent_hash: H256) -> Option<H256> {
+		self.storage_changes_root(&parent_hash.encode()).ok().and_then(|h| h).map(|h| {
+			H256::decode(&mut &h[..]).expect("Node is configured to use the same hash; qed")
+		})
 	}
 
 	/// Get the next key in storage after the given one in lexicographic order.
@@ -223,6 +219,16 @@ pub trait Storage {
 	fn child_next_key(&mut self, child_storage_key: &[u8], key: &[u8]) -> Option<Vec<u8>> {
 		let storage_key = child_storage_key_or_panic(child_storage_key);
 		self.next_child_storage_key(storage_key, key)
+	}
+
+	/// A trie root formed from the iterated items.
+	fn blake2_256_trie_root(input: Vec<(Vec<u8>, Vec<u8>)>) -> H256 {
+		Layout::<primitives::Blake2Hasher>::trie_root(input)
+	}
+
+	/// A trie root formed from the enumerated items.
+	fn blake2_256_ordered_trie_root(input: Vec<Vec<u8>>) -> H256 {
+		Layout::<primitives::Blake2Hasher>::ordered_trie_root(input)
 	}
 }
 

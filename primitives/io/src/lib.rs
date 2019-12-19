@@ -310,12 +310,12 @@ pub trait Storage {
 
 	/// A trie root formed from the iterated items.
 	fn blake2_256_trie_root(input: Vec<(Vec<u8>, Vec<u8>)>) -> H256 {
-		Layout::<primitives::Blake2Hasher>::trie_root(input)
+		Layout::<sp_core::Blake2Hasher>::trie_root(input)
 	}
 
 	/// A trie root formed from the enumerated items.
 	fn blake2_256_ordered_trie_root(input: Vec<Vec<u8>>) -> H256 {
-		Layout::<primitives::Blake2Hasher>::ordered_trie_root(input)
+		Layout::<sp_core::Blake2Hasher>::ordered_trie_root(input)
 	}
 }
 

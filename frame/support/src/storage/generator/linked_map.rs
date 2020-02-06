@@ -16,7 +16,7 @@
 
 use codec::{FullCodec, Encode, Decode, EncodeLike, Ref};
 use crate::{storage::{self, unhashed}, hash::StorageHasher, traits::Len};
-use rstd::marker::PhantomData;
+use sp_std::marker::PhantomData;
 
 /// Generator for `StorageLinkedMap` used by `decl_storage`.
 ///

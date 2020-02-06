@@ -17,7 +17,7 @@
 use sp_std::prelude::*;
 use sp_std::borrow::Borrow;
 use codec::{Ref, FullCodec, FullEncode, Encode, EncodeLike, EncodeAppend};
-use crate::{storage::{self, unhashed}, hash::StorageHasher};
+use crate::{storage::{self, unhashed}, hash::StorageHasher, traits::Len};
 
 /// Generator for `StorageDoubleMap` used by `decl_storage`.
 ///
@@ -171,7 +171,7 @@ where
 	fn iter_prefix<KArg1>(k1: KArg1) -> storage::PrefixIterator<V>
 		where KArg1: ?Sized + EncodeLike<K1>
 	{
-		let prefix = Self::storage_double_map_final_key1(k1);
+		let prefix = Self::storage_double_map_final_key1(k1).as_ref().to_vec();
 		storage::PrefixIterator::<V> {
 			prefix: prefix.clone(),
 			previous_key: prefix,

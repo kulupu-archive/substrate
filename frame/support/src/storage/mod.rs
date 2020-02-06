@@ -18,7 +18,7 @@
 
 use sp_std::{prelude::*, marker::PhantomData};
 use codec::{FullCodec, FullEncode, Encode, EncodeAppend, EncodeLike, Decode};
-use crate::{traits::Len, hash::{Twox128, StorageHasher}};
+use crate::traits::Len;
 
 pub mod unhashed;
 pub mod hashed;
@@ -397,29 +397,16 @@ impl<Value: Decode> Iterator for PrefixIterator<Value> {
 /// Twox128(module_prefix) ++ Twox128(storage_prefix)
 /// ```
 pub trait StoragePrefixedMap<Value: FullCodec> {
-
-	/// Module prefix. Used for generating final key.
-	fn module_prefix() -> &'static [u8];
-
-	/// Storage prefix. Used for generating final key.
-	fn storage_prefix() -> &'static [u8];
-
-	/// Final full prefix that prefixes all keys.
-	fn final_prefix() -> [u8; 32] {
-		let mut final_key = [0u8; 32];
-		final_key[0..16].copy_from_slice(&Twox128::hash(Self::module_prefix()));
-		final_key[16..32].copy_from_slice(&Twox128::hash(Self::storage_prefix()));
-		final_key
-	}
+	fn prefix() -> &'static [u8];
 
 	/// Remove all value of the storage.
 	fn remove_all() {
-		sp_io::storage::clear_prefix(&Self::final_prefix())
+		sp_io::storage::clear_prefix(&Self::prefix())
 	}
 
 	/// Iter over all value of the storage.
 	fn iter() -> PrefixIterator<Value> {
-		let prefix = Self::final_prefix();
+		let prefix = Self::prefix();
 		PrefixIterator {
 			prefix: prefix.to_vec(),
 			previous_key: prefix.to_vec(),
@@ -448,7 +435,7 @@ pub trait StoragePrefixedMap<Value: FullCodec> {
 	fn translate_values<OldValue, TV>(translate_val: TV) -> Result<(), u32>
 		where OldValue: Decode, TV: Fn(OldValue) -> Value
 	{
-		let prefix = Self::final_prefix();
+		let prefix = Self::prefix();
 		let mut previous_key = prefix.to_vec();
 		let mut errors = 0;
 		while let Some(next_key) = sp_io::storage::next_key(&previous_key)

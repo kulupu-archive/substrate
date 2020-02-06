@@ -1,4 +1,4 @@
-// Copyright 2017-2019 Parity Technologies (UK) Ltd.
+// Copyright 2017-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
 // Substrate is free software: you can redistribute it and/or modify
@@ -53,6 +53,9 @@ pub mod testing;
 pub mod traits;
 pub mod transaction_validity;
 pub mod random_number_generator;
+mod runtime_string;
+
+pub use crate::runtime_string::*;
 
 /// Re-export these since they're only "kind of" generic.
 pub use generic::{DigestItem, Digest};
@@ -90,27 +93,6 @@ pub struct ModuleId(pub [u8; 8]);
 
 impl TypeId for ModuleId {
 	const TYPE_ID: [u8; 4] = *b"modl";
-}
-
-/// A String that is a `&'static str` on `no_std` and a `Cow<'static, str>` on `std`.
-#[cfg(feature = "std")]
-pub type RuntimeString = std::borrow::Cow<'static, str>;
-/// A String that is a `&'static str` on `no_std` and a `Cow<'static, str>` on `std`.
-#[cfg(not(feature = "std"))]
-pub type RuntimeString = &'static str;
-
-/// Create a const [`RuntimeString`].
-#[cfg(feature = "std")]
-#[macro_export]
-macro_rules! create_runtime_str {
-	( $y:expr ) => {{ std::borrow::Cow::Borrowed($y) }}
-}
-
-/// Create a const [`RuntimeString`].
-#[cfg(not(feature = "std"))]
-#[macro_export]
-macro_rules! create_runtime_str {
-	( $y:expr ) => {{ $y }}
 }
 
 #[cfg(feature = "std")]
@@ -165,6 +147,16 @@ impl BuildStorage for sp_core::storage::Storage {
 	}
 }
 
+#[cfg(feature = "std")]
+impl BuildStorage for () {
+	fn assimilate_storage(
+		&self,
+		_: &mut sp_core::storage::Storage,
+	)-> Result<(), String> {
+		Err("`assimilate_storage` not implemented for `()`".into())
+	}
+}
+
 /// Consensus engine unique ID.
 pub type ConsensusEngineId = [u8; 4];
 
@@ -212,7 +204,7 @@ pub enum MultiSigner {
 	Ed25519(ed25519::Public),
 	/// An Sr25519 identity.
 	Sr25519(sr25519::Public),
-	/// An SECP256k1/ECDSA identity (actually, the Blake2 hash of the pub key).
+	/// An SECP256k1/ECDSA identity (actually, the Blake2 hash of the compressed pub key).
 	Ecdsa(ecdsa::Public),
 }
 
@@ -246,7 +238,7 @@ impl traits::IdentifyAccount for MultiSigner {
 		match self {
 			MultiSigner::Ed25519(who) => <[u8; 32]>::from(who).into(),
 			MultiSigner::Sr25519(who) => <[u8; 32]>::from(who).into(),
-			MultiSigner::Ecdsa(who) => sp_io::hashing::blake2_256(who.as_ref()).into(),
+			MultiSigner::Ecdsa(who) => sp_io::hashing::blake2_256(&who.as_ref()[..]).into(),
 		}
 	}
 }
@@ -382,6 +374,17 @@ pub enum DispatchError {
 		#[codec(skip)]
 		message: Option<&'static str>,
 	},
+}
+
+impl DispatchError {
+	/// Return the same error but without the attached message.
+	pub fn stripped(self) -> Self {
+		match self {
+			DispatchError::Module { index, error, message: Some(_) }
+				=> DispatchError::Module { index, error, message: None },
+			m => m,
+		}
+	}
 }
 
 impl From<crate::traits::LookupError> for DispatchError {
@@ -677,8 +680,9 @@ pub fn print(print: impl traits::Printable) {
 
 #[cfg(test)]
 mod tests {
-	use crate::DispatchError;
+	use super::*;
 	use codec::{Encode, Decode};
+	use sp_core::crypto::Pair;
 
 	#[test]
 	fn opaque_extrinsic_serialization() {
@@ -704,5 +708,21 @@ mod tests {
 				message: None,
 			},
 		);
+	}
+
+	#[test]
+	fn multi_signature_ecdsa_verify_works() {
+		let msg = &b"test-message"[..];
+		let (pair, _) = ecdsa::Pair::generate();
+
+		let signature = pair.sign(&msg);
+		assert!(ecdsa::Pair::verify(&signature, msg, &pair.public()));
+
+		let multi_sig = MultiSignature::from(signature);
+		let multi_signer = MultiSigner::from(pair.public());
+		assert!(multi_sig.verify(msg, &multi_signer.into_account()));
+
+		let multi_signer = MultiSigner::from(pair.public());
+		assert!(multi_sig.verify(msg, &multi_signer.into_account()));
 	}
 }

@@ -1,4 +1,4 @@
-// Copyright 2017-2019 Parity Technologies (UK) Ltd.
+// Copyright 2017-2020 Parity Technologies (UK) Ltd.
 // This file is part of Substrate.
 
 // Substrate is free software: you can redistribute it and/or modify
@@ -19,9 +19,7 @@
 #![warn(missing_docs)]
 
 #![cfg_attr(not(feature = "std"), no_std)]
-#![cfg_attr(not(feature = "std"), feature(lang_items))]
 #![cfg_attr(not(feature = "std"), feature(alloc_error_handler))]
-#![cfg_attr(not(feature = "std"), feature(core_intrinsics))]
 
 #![cfg_attr(feature = "std",
    doc = "Substrate runtime standard library as compiled when linked with Rust's standard library.")]
@@ -36,7 +34,7 @@ use sp_std::ops::Deref;
 #[cfg(feature = "std")]
 use sp_core::{
 	crypto::Pair,
-	traits::KeystoreExt,
+	traits::{KeystoreExt, CallInWasmExt},
 	offchain::{OffchainExt, TransactionPoolExt},
 	hexdisplay::HexDisplay,
 	storage::{ChildStorageKey, ChildInfo},
@@ -50,7 +48,7 @@ use sp_core::{
 };
 
 #[cfg(feature = "std")]
-use ::sp_trie::{TrieConfiguration, trie_types::Layout};
+use sp_trie::{TrieConfiguration, trie_types::Layout};
 
 use sp_runtime_interface::{runtime_interface, Pointer};
 
@@ -284,9 +282,11 @@ pub trait Storage {
 	///
 	/// The hashing algorithm is defined by the `Block`.
 	fn changes_root(&mut self, parent_hash: H256) -> Option<H256> {
-		self.storage_changes_root(&parent_hash.encode()).ok().and_then(|h| h).map(|h| {
-			H256::decode(&mut &h[..]).expect("Node is configured to use the same hash; qed")
-		})
+		self.storage_changes_root(&parent_hash.encode())
+			.expect("Invalid `parent_hash` given to `changes_root`.")
+			.map(|h| {
+				H256::decode(&mut &h[..]).expect("Node is configured to use the same hash; qed")
+			})
 	}
 
 	/// Get the next key in storage after the given one in lexicographic order.
@@ -356,6 +356,25 @@ pub trait Misc {
 	/// Print any `u8` slice as hex.
 	fn print_hex(data: &[u8]) {
 		log::debug!(target: "runtime", "{}", HexDisplay::from(&data));
+	}
+
+	/// Extract the runtime version of the given wasm blob by calling `Core_version`.
+	///
+	/// Returns the SCALE encoded runtime version and `None` if the call failed.
+	///
+	/// # Performance
+	///
+	/// Calling this function is very expensive and should only be done very occasionally.
+	/// For getting the runtime version, it requires instantiating the wasm blob and calling a
+	/// function in this blob.
+	fn runtime_version(&mut self, wasm: &[u8]) -> Option<Vec<u8>> {
+		// Create some dummy externalities, `Core_version` should not write data anyway.
+		let mut ext = sp_state_machine::BasicExternalities::default();
+
+		self.extension::<CallInWasmExt>()
+			.expect("No `CallInWasmExt` associated for the current context!")
+			.call_in_wasm(wasm, "Core_version", &[], &mut ext)
+			.ok()
 	}
 }
 
@@ -596,7 +615,7 @@ pub trait Offchain {
 	/// offchain worker tasks running on the same machine. It IS persisted between runs.
 	fn local_storage_set(&mut self, kind: StorageKind, key: &[u8], value: &[u8]) {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("local_storage_set can be called only in the offchain worker context")
 			.local_storage_set(kind, key, value)
 	}
 
@@ -617,7 +636,7 @@ pub trait Offchain {
 		new_value: &[u8],
 	) -> bool {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("local_storage_compare_and_set can be called only in the offchain worker context")
 			.local_storage_compare_and_set(kind, key, old_value.as_ref().map(|v| v.deref()), new_value)
 	}
 
@@ -628,7 +647,7 @@ pub trait Offchain {
 	/// offchain worker tasks running on the same machine. It IS persisted between runs.
 	fn local_storage_get(&mut self, kind: StorageKind, key: &[u8]) -> Option<Vec<u8>> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("local_storage_get can be called only in the offchain worker context")
 			.local_storage_get(kind, key)
 	}
 
@@ -643,7 +662,7 @@ pub trait Offchain {
 		meta: &[u8],
 	) -> Result<HttpRequestId, ()> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_request_start can be called only in the offchain worker context")
 			.http_request_start(method, uri, meta)
 	}
 
@@ -655,7 +674,7 @@ pub trait Offchain {
 		value: &str,
 	) -> Result<(), ()> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_request_add_header can be called only in the offchain worker context")
 			.http_request_add_header(request_id, name, value)
 	}
 
@@ -672,7 +691,7 @@ pub trait Offchain {
 		deadline: Option<Timestamp>,
 	) -> Result<(), HttpError> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_request_write_body can be called only in the offchain worker context")
 			.http_request_write_body(request_id, chunk, deadline)
 	}
 
@@ -689,7 +708,7 @@ pub trait Offchain {
 		deadline: Option<Timestamp>,
 	) -> Vec<HttpRequestStatus> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_response_wait can be called only in the offchain worker context")
 			.http_response_wait(ids, deadline)
 	}
 
@@ -699,7 +718,7 @@ pub trait Offchain {
 	/// NOTE response headers have to be read before response body.
 	fn http_response_headers(&mut self, request_id: HttpRequestId) -> Vec<(Vec<u8>, Vec<u8>)> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_response_headers can be called only in the offchain worker context")
 			.http_response_headers(request_id)
 	}
 
@@ -718,7 +737,7 @@ pub trait Offchain {
 		deadline: Option<Timestamp>,
 	) -> Result<u32, HttpError> {
 		self.extension::<OffchainExt>()
-			.expect("random_seed can be called only in the offchain worker context")
+			.expect("http_response_read_body can be called only in the offchain worker context")
 			.http_response_read_body(request_id, buffer, deadline)
 			.map(|r| r as u32)
 	}
@@ -837,6 +856,14 @@ pub trait Sandbox {
 	fn instance_teardown(&mut self, instance_idx: u32) {
 		self.sandbox().instance_teardown(instance_idx).expect("Failed to teardown sandbox instance")
 	}
+
+	/// Get the value from a global with the given `name`. The sandbox is determined by the given
+	/// `instance_idx`.
+	///
+	/// Returns `Some(_)` when the requested global variable could be found.
+	fn get_global_val(&mut self, instance_idx: u32, name: &str) -> Option<sp_wasm_interface::Value> {
+		self.sandbox().get_global_val(instance_idx, name).expect("Failed to get global from sandbox")
+	}
 }
 
 /// Allocator used by Substrate when executing the Wasm runtime.
@@ -871,7 +898,7 @@ pub fn panic(info: &core::panic::PanicInfo) -> ! {
 	unsafe {
 		let message = sp_std::alloc::format!("{}", info);
 		logging::log(LogLevel::Error, "runtime", message.as_bytes());
-		core::intrinsics::abort()
+		core::arch::wasm32::unreachable();
 	}
 }
 
@@ -881,7 +908,7 @@ pub fn panic(info: &core::panic::PanicInfo) -> ! {
 pub fn oom(_: core::alloc::Layout) -> ! {
 	unsafe {
 		logging::log(LogLevel::Error, "runtime", b"Runtime memory exhausted. Aborting");
-		core::intrinsics::abort();
+		core::arch::wasm32::unreachable();
 	}
 }
 

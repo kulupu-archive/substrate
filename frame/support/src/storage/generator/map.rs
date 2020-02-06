@@ -18,13 +18,13 @@
 use sp_std::prelude::*;
 use sp_std::borrow::Borrow;
 use codec::{FullCodec, FullEncode, Encode, EncodeLike, Ref, EncodeAppend};
-use crate::{storage::{self, unhashed}, hash::{StorageHasher, Twox128}, traits::Len};
+use crate::{storage::{self, unhashed}, hash::StorageHasher, traits::Len};
 
 /// Generator for `StorageMap` used by `decl_storage`.
 ///
-/// By default each key value is stored at:
+/// For each key value is stored at:
 /// ```nocompile
-/// Twox128(module_prefix) ++ Twox128(storage_prefix) ++ Hasher(encode(key))
+/// Hasher(prefix ++ key)
 /// ```
 ///
 /// # Warning
@@ -35,14 +35,11 @@ pub trait StorageMap<K: FullEncode, V: FullCodec> {
 	/// The type that get/take returns.
 	type Query;
 
-	/// Hasher. Used for generating final key.
+	/// Hasher used to insert into storage.
 	type Hasher: StorageHasher;
 
-	/// Module prefix. Used for generating final key.
-	fn module_prefix() -> &'static [u8];
-
-	/// Storage prefix. Used for generating final key.
-	fn storage_prefix() -> &'static [u8];
+	/// Prefix used to prepend each key.
+	fn prefix() -> &'static [u8];
 
 	/// Convert an optional value retrieved from storage to the type queried.
 	fn from_optional_value_to_query(v: Option<V>) -> Self::Query;
@@ -51,23 +48,13 @@ pub trait StorageMap<K: FullEncode, V: FullCodec> {
 	fn from_query_to_optional_value(v: Self::Query) -> Option<V>;
 
 	/// Generate the full key used in top storage.
-	fn storage_map_final_key<KeyArg>(key: KeyArg) -> Vec<u8>
+	fn storage_map_final_key<KeyArg>(key: KeyArg) -> <Self::Hasher as StorageHasher>::Output
 	where
 		KeyArg: EncodeLike<K>,
 	{
-		let module_prefix_hashed = Twox128::hash(Self::module_prefix());
-		let storage_prefix_hashed = Twox128::hash(Self::storage_prefix());
-		let key_hashed = key.borrow().using_encoded(Self::Hasher::hash);
-
-		let mut final_key = Vec::with_capacity(
-			module_prefix_hashed.len() + storage_prefix_hashed.len() + key_hashed.as_ref().len()
-		);
-
-		final_key.extend_from_slice(&module_prefix_hashed[..]);
-		final_key.extend_from_slice(&storage_prefix_hashed[..]);
-		final_key.extend_from_slice(key_hashed.as_ref());
-
-		final_key
+		let mut final_key = Self::prefix().to_vec();
+		key.borrow().encode_to(&mut final_key);
+		Self::Hasher::hash(&final_key)
 	}
 }
 
@@ -75,7 +62,7 @@ impl<K: FullEncode, V: FullCodec, G: StorageMap<K, V>> storage::StorageMap<K, V>
 	type Query = G::Query;
 
 	fn hashed_key_for<KeyArg: EncodeLike<K>>(key: KeyArg) -> Vec<u8> {
-		Self::storage_map_final_key(key)
+		Self::storage_map_final_key(key).as_ref().to_vec()
 	}
 
 	fn swap<KeyArg1: EncodeLike<K>, KeyArg2: EncodeLike<K>>(key1: KeyArg1, key2: KeyArg2) {
